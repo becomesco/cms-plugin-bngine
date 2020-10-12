@@ -9,6 +9,27 @@
   let jobs: JobLite[] = [];
   let selectedView = 'builds';
 
+  async function getNewJob(jobId: string) {
+    const newJob: JobLite = await GeneralService.errorWrapper(
+      async () => {
+        return sdk.send({
+          url: `/plugin/bngine/job/lite/${jobId}`,
+          method: 'GET',
+          headers: {
+            Authorization: '',
+          },
+        });
+      },
+      async (result: { job: JobLite }) => {
+        return result.job;
+      },
+    );
+    if (!newJob) {
+      return;
+    }
+    jobs = [newJob, ...jobs.filter((e) => e._id !== jobId)];
+  }
+
   onMount(async () => {
     const p: Project[] = await GeneralService.errorWrapper(
       async () => {
@@ -66,7 +87,12 @@
         {#if selectedView === 'projects'}
           <ProjectsView {projects} />
         {:else if selectedView === 'builds'}
-          <BuildsView {projects} {jobs} />
+          <BuildsView
+            {projects}
+            {jobs}
+            on:new={(event) => {
+              getNewJob(event.detail);
+            }} />
         {/if}
       </div>
     </div>

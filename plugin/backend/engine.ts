@@ -121,6 +121,12 @@ export class BuildEngine {
       await util.promisify(fs.mkdir)(
         path.join(process.cwd(), 'bngine-workspace'),
       );
+    }
+    if (
+      (await util.promisify(fs.exists)(
+        path.join(process.cwd(), 'bngine-workspace', '.ssh'),
+      )) === false
+    ) {
       await util.promisify(fs.mkdir)(
         path.join(process.cwd(), 'bngine-workspace', '.ssh'),
       );

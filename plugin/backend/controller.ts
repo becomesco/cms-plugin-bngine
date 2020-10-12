@@ -4,6 +4,8 @@ import {
   Delete,
   Get,
   HttpErrorFactory,
+  JWTConfigService,
+  JWTEncryptionAlg,
   Logger,
   Post,
   Put,
@@ -13,6 +15,14 @@ import type { JobLite } from './interfaces/job-lite';
 import type { Job, JobFS, ProjectProtected } from './models';
 import { JobRequestHandler } from './request-handlers';
 import { ProjectRequestHandler } from './request-handlers/project';
+
+JWTConfigService.add({
+  id: 'user-token-config',
+  alg: JWTEncryptionAlg.HMACSHA256,
+  expIn: parseInt(process.env.JWT_EXP_AFTER, 10),
+  issuer: process.env.JWT_ISSUER,
+  secret: process.env.JWT_SECRET,
+});
 
 @Controller('/api/plugin/bngine')
 export class PluginController implements ControllerPrototype {

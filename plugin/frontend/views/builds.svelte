@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { beforeUpdate, onDestroy } from 'svelte';
+  import {
+    onMount,
+    beforeUpdate,
+    onDestroy,
+    createEventDispatcher,
+  } from 'svelte';
   import {
     Button,
     StoreService,
@@ -23,6 +28,7 @@
     BngineJobDetailsModal,
   } from '../components';
 
+  const dispatch = createEventDispatcher();
   export let projects: Project[];
   export let jobs: JobLite[] = [
     {
@@ -51,66 +57,67 @@
       pipeId?: string;
       pipeTitle?: string;
     }) => {
-      switch (data.state) {
-        case 'job-started':
-          {
-            if (!runningJob) {
-              runningJob = parseJob(await getJobLite(data.jobId));
-              runningJob.pipe = [];
-            } else {
+      if (runningJob) {
+        switch (data.state) {
+          case 'job-started':
+            {
               runningJob.status = 'RUNNING' as JobStatus;
               runningJob.inQueueFor = data.inQueueFor;
             }
-          }
-          break;
-        case 'new-pipe':
-          {
-            runningJob.pipe = [...runningJob.pipe, parsePipe(data.pipe)];
-          }
-          break;
-        case 'pipe-update-err':
-          {
-            for (const i in runningJob.pipe) {
-              const pipe = runningJob.pipe[i];
-              if (pipe.id === data.pipeId) {
-                runningJob.pipe[i].err += data.err;
-                break;
+            break;
+          case 'new-pipe':
+            {
+              runningJob.pipe = [...runningJob.pipe, parsePipe(data.pipe)];
+            }
+            break;
+          case 'pipe-update-err':
+            {
+              for (const i in runningJob.pipe) {
+                const pipe = runningJob.pipe[i];
+                if (pipe.id === data.pipeId) {
+                  runningJob.pipe[i].err += data.err;
+                  break;
+                }
               }
             }
-          }
-          break;
-        case 'pipe-update-out':
-          {
-            for (const i in runningJob.pipe) {
-              const pipe = runningJob.pipe[i];
-              if (pipe.id === data.pipeId) {
-                runningJob.pipe[i].out += data.out;
-                break;
+            break;
+          case 'pipe-update-out':
+            {
+              for (const i in runningJob.pipe) {
+                const pipe = runningJob.pipe[i];
+                if (pipe.id === data.pipeId) {
+                  runningJob.pipe[i].out += data.out;
+                  break;
+                }
               }
             }
-          }
-          break;
-        case 'pipe-done':
-          {
-            const pipe = parsePipe(data.pipe);
-            pipe.timeToExec = parseMillis(data.pipe.timeToExec);
-            for (const i in runningJob.pipe) {
-              if (pipe.id === runningJob.pipe[i].id) {
-                runningJob.pipe[i] = pipe;
-                break;
+            break;
+          case 'pipe-done':
+            {
+              const pipe = parsePipe(data.pipe);
+              pipe.timeToExec = parseMillis(data.pipe.timeToExec);
+              for (const i in runningJob.pipe) {
+                if (pipe.id === runningJob.pipe[i].id) {
+                  runningJob.pipe[i] = pipe;
+                  break;
+                }
               }
             }
-          }
-          break;
-        case 'done':
-          {
-            jobs = [await getJobLite(data.jobId), ...jobs];
-            setTimeout(async () => {
-              runningJob = undefined;
-            }, 100);
-            // getJobs();
-          }
-          break;
+            break;
+          case 'done':
+            {
+              setTimeout(async () => {
+                runningJob = undefined;
+              }, 100);
+              dispatch('new', data.jobId);
+            }
+            break;
+        }
+      } else {
+        runningJob = parseJob(await getJobLite(data.jobId));
+        if (!runningJob.pipe) {
+          runningJob.pipe = [];
+        }
       }
     },
   );
@@ -120,6 +127,7 @@
   let productionProject: Project;
   let stagingProject: Project;
   let previewProject: Project;
+  let hasRunningJob: boolean = false;
 
   async function startJob(
     projectName: string,
@@ -237,7 +245,40 @@
       previewProject = projects.find((e) => e.name === 'preview');
     }
     if (jobs) {
-      jobsModified = jobs.map((job) => parseJob(job));
+      const runningJob = jobs.find((e) => e.status === 'RUNNING');
+      if (runningJob) {
+        hasRunningJob = true;
+      } else {
+        hasRunningJob = false;
+      }
+      jobsModified = jobs
+        .filter((e) => e.status !== 'RUNNING')
+        .map((job) => parseJob(job));
+    }
+  });
+  onMount(async () => {
+    if (!runningJob) {
+      const currentlyRunningJob = jobsModified.find(
+        (e) => e.status === 'RUNNING',
+      );
+      if (currentlyRunningJob) {
+        const j = await GeneralService.errorWrapper(
+          async () => {
+            return sdk.send({
+              url: `/plugin/bngine/job/${currentlyRunningJob._id}`,
+              method: 'GET',
+              headers: {
+                Authorization: '',
+              },
+            });
+          },
+          async (result: { job: Job }) => {
+            return result.job;
+          },
+        );
+        currentlyRunningJob.pipe = j.pipe;
+        runningJob = currentlyRunningJob;
+      }
     }
   });
   onDestroy(() => {
@@ -254,31 +295,31 @@
   <h3>Builds</h3>
   {#if projects && jobsModified}
     <div class="bngine--builds-top">
-      {#if stagingProject}
+      {#if stagingProject && stagingProject.run.length > 0}
         <Button
-          disabled={runningJob ? true : false}
+          disabled={runningJob ? true : false || hasRunningJob}
           on:click={() => {
             startJob(stagingProject.name);
           }}>
           Staging
         </Button>
       {/if}
-      {#if productionProject}
+      {#if productionProject && productionProject.run.length > 0}
         <Button
           class="ml--auto"
           kind="secondary"
-          disabled={runningJob ? true : false}
+          disabled={runningJob ? true : false || hasRunningJob}
           on:click={() => {
             startJob(productionProject.name);
           }}>
           Production
         </Button>
       {/if}
-      {#if previewProject}
+      {#if previewProject && previewProject.run.length > 0}
         <Button
           class="ml--20"
           kind="ghost"
-          disabled={runningJob ? true : false}
+          disabled={runningJob ? true : false || hasRunningJob}
           on:click={() => {
             StoreService.update('BnginePreviewBuildsModal', true);
           }}>
